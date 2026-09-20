@@ -11,6 +11,16 @@ public protocol NetworkService: Sendable {
     func request(
         _ endpoint: Endpoint<Void>
     ) async throws
+
+    /// Same pipeline as `request`, including status, headers, and raw `data`.
+    func requestWithResponse<Response: Decodable & Sendable>(
+        _ endpoint: Endpoint<Response>
+    ) async throws -> NetworkResponse<Response>
+
+    /// Same pipeline as `request` for empty bodies, including the HTTP response.
+    func requestWithResponse(
+        _ endpoint: Endpoint<Void>
+    ) async throws -> NetworkResponse<Void>
 }
 
 /// Sends a `URLRequest` and returns HTTP bytes.

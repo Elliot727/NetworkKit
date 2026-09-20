@@ -7,7 +7,8 @@ import Foundation
 /// still missing.
 ///
 /// Recreate the value when default headers change (for example a new token).
-/// There is no retry, auth refresh, or access to success-response headers.
+/// There is no retry or auth refresh. Use `requestWithResponse` for status
+/// and success-response headers.
 nonisolated
 public struct DefaultNetworkService: NetworkService {
     private let baseURL: URL
@@ -43,24 +44,48 @@ public struct DefaultNetworkService: NetworkService {
     public func request<Response: Decodable>(
         _ endpoint: Endpoint<Response>
     ) async throws -> Response {
-        let request = makeURLRequest(endpoint)
-
-        let (data, response) = try await transport.execute(request)
-
-        try validator.validate(response, data: data)
-
+        let (data, _) = try await executeValidated(endpoint)
         return try decoder.decode(data)
     }
-    
+
     /// Validates status and returns. The body is not decoded.
     public func request(
         _ endpoint: Endpoint<Void>
     ) async throws {
+        _ = try await executeValidated(endpoint)
+    }
+
+    /// Same pipeline as `request`, including the HTTP response.
+    public func requestWithResponse<Response: Decodable & Sendable>(
+        _ endpoint: Endpoint<Response>
+    ) async throws -> NetworkResponse<Response> {
+        let (data, response) = try await executeValidated(endpoint)
+        return NetworkResponse(
+            value: try decoder.decode(data),
+            data: data,
+            response: response
+        )
+    }
+
+    /// Same pipeline as `request` for empty bodies, including the HTTP response.
+    public func requestWithResponse(
+        _ endpoint: Endpoint<Void>
+    ) async throws -> NetworkResponse<Void> {
+        let (data, response) = try await executeValidated(endpoint)
+        return NetworkResponse(
+            value: (),
+            data: data,
+            response: response
+        )
+    }
+
+    private func executeValidated<Response>(
+        _ endpoint: Endpoint<Response>
+    ) async throws -> (Data, HTTPURLResponse) {
         let request = makeURLRequest(endpoint)
-
         let (data, response) = try await transport.execute(request)
-
         try validator.validate(response, data: data)
+        return (data, response)
     }
 
     private func makeURLRequest<Response>(

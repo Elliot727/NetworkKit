@@ -2,9 +2,10 @@ import Foundation
 
 /// Errors produced by NetworkKit itself.
 ///
-/// `request` also throws `URLError` from `URLSession`, `CancellationError`
-/// when the task is cancelled, and `DecodingError` (or a custom decoder's
-/// error) when the body cannot be decoded. Those are not wrapped.
+/// `request` and `requestWithResponse` also throw `URLError` from
+/// `URLSession`, `CancellationError` when the task is cancelled, and
+/// `DecodingError` (or a custom decoder's error) when the body cannot be
+/// decoded. Those are not wrapped.
 nonisolated
 public enum NetworkError: Error, Sendable {
     /// The transport returned a non-HTTP response.

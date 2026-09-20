@@ -30,7 +30,19 @@ let users: [User] = try await service.request(
 try await service.request(
     Endpoint<Void>(path: "users/1", method: .delete)
 )
-````
+
+let response: NetworkResponse<User> =
+    try await service.requestWithResponse(
+        Endpoint(path: "users/1", method: .get)
+    )
+let etag = response.headers.value(for: "ETag")
+
+let deleted: NetworkResponse<Void> =
+    try await service.requestWithResponse(
+        Endpoint<Void>(path: "users/1", method: .delete)
+    )
+let location = deleted.headers.value(for: "Location")
+```
 
 Replace the whole `DefaultNetworkService` value when default headers change, for example when a token changes.
 
@@ -75,7 +87,7 @@ Endpoint headers therefore override service defaults.
 
 **JSON bodies** can be created with `try .json(value)`, which encodes an `Encodable` value. `.json(Data)` is for JSON bytes you already have.
 
-**Errors** from `request`:
+**Errors** from `request` and `requestWithResponse`:
 
 | Thrown                                              | When                                                                       |
 | --------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -87,7 +99,7 @@ Endpoint headers therefore override service defaults.
 
 NetworkKit does not map HTTP error bodies onto an application-specific `APIError` type. Decode the raw `data` yourself when needed.
 
-A successful `request` returns only the decoded value. Response metadata such as `ETag`, `Link`, rate-limit headers, and status codes is not exposed.
+A successful `request` returns only the decoded value, or nothing for `Endpoint<Void>`. Use `requestWithResponse` when you need status, headers, or the raw body (`ETag`, `Link`, `Location`, rate-limit headers). That includes `Endpoint<Void>` — the body is not decoded, but the HTTP response is still returned.
 
 ## Customization
 

@@ -17,6 +17,16 @@ public struct HTTPHeaders: Sendable {
         }
     }
 
+    /// Creates headers from an `HTTPURLResponse`. Names are lowercased.
+    public init(_ response: HTTPURLResponse) {
+        var values: [String: String] = [:]
+        for (key, value) in response.allHeaderFields {
+            guard let name = key as? String else { continue }
+            values[name] = value as? String ?? String(describing: value)
+        }
+        self.init(values)
+    }
+
     /// Sets `value` for `name`, replacing any existing value for that name.
     public mutating func set(_ value: String, for name: String) {
         values[name.lowercased()] = value

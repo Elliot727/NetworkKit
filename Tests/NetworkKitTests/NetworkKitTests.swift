@@ -17,15 +17,18 @@ private actor RequestCapture {
 private struct StubTransport: HTTPTransport {
     let data: Data
     let statusCode: Int
+    let headerFields: [String: String]?
     let capture: RequestCapture
 
     init(
         data: Data = Data(),
         statusCode: Int = 200,
+        headerFields: [String: String]? = nil,
         capture: RequestCapture = RequestCapture()
     ) {
         self.data = data
         self.statusCode = statusCode
+        self.headerFields = headerFields
         self.capture = capture
     }
 
@@ -38,7 +41,7 @@ private struct StubTransport: HTTPTransport {
             url: url,
             statusCode: statusCode,
             httpVersion: nil,
-            headerFields: nil
+            headerFields: headerFields
         )!
         return (data, response)
     }
@@ -316,6 +319,73 @@ private func makeService(
     #expect(code == 400)
     #expect(data == body)
     #expect(response.statusCode == 400)
+}
+
+@Test func requestWithResponseIncludesValueStatusAndHeaders() async throws {
+    let body = Data(#"{"id":7}"#.utf8)
+    let service = makeService(
+        transport: StubTransport(
+            data: body,
+            statusCode: 201,
+            headerFields: [
+                "ETag": "\"abc\"",
+                "X-RateLimit-Remaining": "9",
+            ]
+        )
+    )
+
+    let response: NetworkResponse<User> = try await service.requestWithResponse(
+        Endpoint(path: "users/7", method: .get)
+    )
+    #expect(response.value == User(id: 7))
+    #expect(response.statusCode == 201)
+    #expect(response.headers.value(for: "ETag") == "\"abc\"")
+    #expect(response.headers.value(for: "X-RateLimit-Remaining") == "9")
+    #expect(response.data == body)
+    #expect(response.response.statusCode == 201)
+}
+
+@Test func requestWithResponseOnVoidKeepsStatusAndHeaders() async throws {
+    let service = makeService(
+        transport: StubTransport(
+            data: Data(),
+            statusCode: 204,
+            headerFields: [
+                "ETag": "\"abc\"",
+                "Location": "https://api.example.com/v1/users/1",
+            ]
+        )
+    )
+
+    let response: NetworkResponse<Void> = try await service.requestWithResponse(
+        Endpoint<Void>(path: "users/1", method: .delete)
+    )
+    #expect(response.statusCode == 204)
+    #expect(response.headers.value(for: "ETag") == "\"abc\"")
+    #expect(
+        response.headers.value(for: "Location")
+            == "https://api.example.com/v1/users/1"
+    )
+    #expect(response.data.isEmpty)
+}
+
+@Test func requestWithResponseStillThrowsHTTPError() async throws {
+    let body = Data(#"{"error":"nope"}"#.utf8)
+    let service = makeService(
+        transport: StubTransport(data: body, statusCode: 400)
+    )
+
+    let error = try await #require(throws: NetworkError.self) {
+        try await service.requestWithResponse(
+            Endpoint<User>(path: "users", method: .get)
+        )
+    }
+    guard case .httpError(let code, let data, _) = error else {
+        Issue.record("expected httpError")
+        return
+    }
+    #expect(code == 400)
+    #expect(data == body)
 }
 
 @Test func emptySuccessDoesNotDecodeOnVoidEndpoint() async throws {
