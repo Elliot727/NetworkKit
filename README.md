@@ -27,6 +27,7 @@ let users: [User] = try await service.request(
     Endpoint(path: "users", method: .get)
 )
 
+// Empty 2xx, such as 204. A model type throws DecodingError on an empty body.
 try await service.request(
     Endpoint<Void>(path: "users/1", method: .delete)
 )
@@ -87,6 +88,10 @@ Endpoint headers therefore override service defaults.
 
 **JSON bodies** can be created with `try .json(value)`, which encodes an `Encodable` value. `.json(Data)` is for JSON bytes you already have.
 
+**Timeouts.** Set `timeoutInterval` on an `Endpoint` (seconds) to copy it onto the `URLRequest`. `nil` leaves `URLRequest`'s default of 60 seconds. Put other session settings, such as `timeoutIntervalForResource`, on a custom `URLSession` passed to `URLSessionTransport`.
+
+**Empty bodies.** `Endpoint<Void>` accepts an empty `2xx` body, such as `204`, and skips decoding. A model response type always decodes, so that same empty body throws `DecodingError`.
+
 **Errors** from `request` and `requestWithResponse`:
 
 | Thrown                                              | When                                                                       |
@@ -95,7 +100,7 @@ Endpoint headers therefore override service defaults.
 | `NetworkError.invalidResponse`                      | The transport did not return an `HTTPURLResponse`.                         |
 | `URLError`                                          | The underlying transport or connectivity operation failed.                 |
 | `CancellationError`                                 | The task was cancelled.                                                    |
-| `DecodingError` / decoder-specific error            | Response decoding failed.                                                  |
+| `DecodingError` / decoder-specific error            | Response decoding failed, including an empty body for a model type.        |
 
 NetworkKit does not map HTTP error bodies onto an application-specific `APIError` type. Decode the raw `data` yourself when needed.
 

@@ -57,16 +57,39 @@ private struct FailingTransport: HTTPTransport {
     }
 }
 
+/// `HTTPURLResponse` whose `allHeaderFields` can hold non-string values.
+private final class HeaderFieldResponse: HTTPURLResponse, @unchecked Sendable {
+    private let fields: [AnyHashable: Any]
+
+    init(fields: [AnyHashable: Any]) {
+        self.fields = fields
+        super.init(
+            url: URL(string: "https://example.com")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override var allHeaderFields: [AnyHashable: Any] { fields }
+}
+
 private func makeService(
     baseURL: URL = URL(string: "https://api.example.com/v1")!,
     defaultHeaders: HTTPHeaders = HTTPHeaders(),
     transport: any HTTPTransport,
+    validator: any HTTPStatusValidator = DefaultStatusValidator(),
     decoder: any ResponseDecoder = JSONResponseDecoder()
 ) -> DefaultNetworkService {
     DefaultNetworkService(
         baseURL: baseURL,
         defaultHeaders: defaultHeaders,
         transport: transport,
+        validator: validator,
         decoder: decoder
     )
 }
@@ -92,6 +115,46 @@ private func makeService(
     headers.set("Bearer b", for: "AUTHORIZATION")
     #expect(headers.value(for: "Authorization") == "Bearer b")
     #expect(headers.dictionary.count == 1)
+}
+
+@Test func headersFromResponseLowercaseNames() {
+    let response = HTTPURLResponse(
+        url: URL(string: "https://example.com")!,
+        statusCode: 200,
+        httpVersion: nil,
+        headerFields: [
+            "ETag": "\"abc\"",
+            "X-RateLimit-Remaining": "9",
+        ]
+    )!
+    let headers = HTTPHeaders(response)
+
+    #expect(headers.dictionary["etag"] == "\"abc\"")
+    #expect(headers.dictionary["Etag"] == nil)
+    #expect(headers.dictionary["ETag"] == nil)
+    #expect(headers.value(for: "ETag") == "\"abc\"")
+    #expect(headers.dictionary["x-ratelimit-remaining"] == "9")
+    #expect(headers.value(for: "X-RateLimit-Remaining") == "9")
+}
+
+@Test func headersFromResponseCoerceNonStringValues() {
+    final class Box: CustomStringConvertible {
+        var description: String { "token-1" }
+    }
+
+    let response = HeaderFieldResponse(fields: [
+        "ETag": "\"abc\"",
+        "X-Count": NSNumber(value: 12),
+        "X-Token": Box(),
+        1: "ignored",
+    ])
+    let headers = HTTPHeaders(response)
+
+    #expect(headers.dictionary["etag"] == "\"abc\"")
+    #expect(headers.value(for: "x-count") == "12")
+    #expect(headers.value(for: "x-token") == "token-1")
+    #expect(headers.dictionary["1"] == nil)
+    #expect(headers.dictionary.count == 3)
 }
 
 // MARK: - Status
@@ -275,6 +338,59 @@ private func makeService(
     #expect(request?.value(forHTTPHeaderField: "Content-Type") == nil)
 }
 
+@Test func endpointContentTypeOverridesDefaultAndBody() async throws {
+    let capture = RequestCapture()
+    let service = makeService(
+        defaultHeaders: HTTPHeaders([
+            "Content-Type": "text/plain",
+        ]),
+        transport: StubTransport(capture: capture)
+    )
+
+    try await service.request(
+        Endpoint<Void>(
+            path: "users",
+            method: .post,
+            headers: HTTPHeaders([
+                "content-type": "application/merge-patch+json",
+            ]),
+            body: .json(Data(#"{}"#.utf8))
+        )
+    )
+
+    let request = await capture.request
+    #expect(
+        request?.value(forHTTPHeaderField: "Content-Type")
+            == "application/merge-patch+json"
+    )
+}
+
+@Test func timeoutIntervalIsCopiedOntoTheRequest() async throws {
+    let capture = RequestCapture()
+    let service = makeService(transport: StubTransport(capture: capture))
+
+    try await service.request(
+        Endpoint<Void>(
+            path: "users",
+            method: .get,
+            timeoutInterval: 12
+        )
+    )
+
+    let request = await capture.request
+    #expect(request?.timeoutInterval == 12)
+}
+
+@Test func omittedTimeoutKeepsTheURLRequestDefault() async throws {
+    let capture = RequestCapture()
+    let service = makeService(transport: StubTransport(capture: capture))
+
+    try await service.request(Endpoint<Void>(path: "users", method: .get))
+
+    let request = await capture.request
+    #expect(request?.timeoutInterval == 60)
+}
+
 @Test func getWithoutBodyDoesNotSetHTTPBody() async throws {
     let capture = RequestCapture()
     let service = makeService(transport: StubTransport(capture: capture))
@@ -286,6 +402,70 @@ private func makeService(
 }
 
 // MARK: - Pipeline
+
+@Test func customDecoderConvertsSnakeCaseKeys() async throws {
+    struct Profile: Decodable, Equatable, Sendable {
+        let firstName: String
+    }
+
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let service = makeService(
+        transport: StubTransport(
+            data: Data(#"{"first_name":"Ada"}"#.utf8)
+        ),
+        decoder: JSONResponseDecoder(decoder: decoder)
+    )
+
+    let profile: Profile = try await service.request(
+        Endpoint(path: "profile", method: .get)
+    )
+    #expect(profile == Profile(firstName: "Ada"))
+}
+
+@Test func customValidatorAcceptsStatusOutside2xx() async throws {
+    struct AcceptNotModified: HTTPStatusValidator {
+        func validate(
+            _ response: HTTPURLResponse,
+            data: Data
+        ) throws {
+            if response.statusCode == 304
+                || (200...299).contains(response.statusCode) {
+                return
+            }
+            throw NetworkError.httpError(
+                statusCode: response.statusCode,
+                data: data,
+                response: response
+            )
+        }
+    }
+
+    let accepted = makeService(
+        transport: StubTransport(data: Data(), statusCode: 304),
+        validator: AcceptNotModified()
+    )
+    try await accepted.request(
+        Endpoint<Void>(path: "users/1", method: .get)
+    )
+
+    let body = Data("nope".utf8)
+    let rejected = makeService(
+        transport: StubTransport(data: body, statusCode: 400),
+        validator: AcceptNotModified()
+    )
+    let error = try await #require(throws: NetworkError.self) {
+        try await rejected.request(
+            Endpoint<Void>(path: "users/1", method: .get)
+        )
+    }
+    guard case .httpError(let code, let data, _) = error else {
+        Issue.record("expected httpError")
+        return
+    }
+    #expect(code == 400)
+    #expect(data == body)
+}
 
 @Test func decodesJSONAfterSuccess() async throws {
     let service = makeService(

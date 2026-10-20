@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Header merge: `defaultHeaders`, then endpoint headers (endpoint wins on
 /// the same name). Body `Content-Type` is applied only if that header is
-/// still missing.
+/// still missing. A set `Endpoint.timeoutInterval` is copied onto the request.
 ///
 /// Recreate the value when default headers change (for example a new token).
 /// There is no retry or auth refresh. Use `requestWithResponse` for status
@@ -103,6 +103,9 @@ public struct DefaultNetworkService: NetworkService {
 
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method.rawValue
+        if let timeoutInterval = endpoint.timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
 
         var headers = defaultHeaders.dictionary
         headers.merge(endpoint.headers.dictionary) { _, endpointValue in
