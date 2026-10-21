@@ -20,7 +20,8 @@ public struct DefaultNetworkService: NetworkService {
     /// Creates a service.
     ///
     /// `baseURL` should include any API prefix (`https://api.example.com/v1`).
-    /// Paths from endpoints are appended with `URL.append(path:)`.
+    /// Paths are appended with `URL.append(path:)`, or with
+    /// `URL.append(component:)` when the endpoint encodes path separators.
     /// The default transport uses `URLSession.shared`.
     public init(
         baseURL: URL,
@@ -94,7 +95,11 @@ public struct DefaultNetworkService: NetworkService {
         var url = baseURL
 
         if !endpoint.path.isEmpty {
-            url.append(path: endpoint.path)
+            if endpoint.encodesPathSeparators {
+                url.append(component: endpoint.path)
+            } else {
+                url.append(path: endpoint.path)
+            }
         }
 
         if !endpoint.queryItems.isEmpty {

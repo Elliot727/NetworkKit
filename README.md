@@ -76,7 +76,7 @@ let created: User = try await service.request(.create(NewUser(name: "Ada")))
 
 ## Behaviour
 
-**Paths** are relative to `baseURL`. Leading slashes are stripped. Pass a raw path (`users/42`), not a percent-encoded one. Absolute URLs are not supported.
+**Paths** are relative to `baseURL`. Leading slashes are stripped. Pass a raw path (`users/42`), not a percent-encoded one. `/` separates components. Set `encodesPathSeparators: true` when a slash is part of one component and must be sent as `%2F`. Absolute URLs are not supported.
 
 **Headers** are merged in this order:
 

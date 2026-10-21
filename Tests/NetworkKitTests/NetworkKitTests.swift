@@ -224,6 +224,25 @@ private func makeService(
     )
 }
 
+@Test func encodesPathSeparatorsAsOneComponent() async throws {
+    let capture = RequestCapture()
+    let service = makeService(transport: StubTransport(capture: capture))
+
+    try await service.request(
+        Endpoint<Void>(
+            path: "nyct/gtfs-ace",
+            method: .get,
+            encodesPathSeparators: true
+        )
+    )
+
+    let request = await capture.request
+    #expect(
+        request?.url?.absoluteString
+            == "https://api.example.com/v1/nyct%2Fgtfs-ace"
+    )
+}
+
 @Test func emptyPathDoesNotAddTrailingSlash() async throws {
     let capture = RequestCapture()
     let service = makeService(transport: StubTransport(capture: capture))
